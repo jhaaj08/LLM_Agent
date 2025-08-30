@@ -29,6 +29,47 @@ let conversation = [
   }
 ];
 let running = false;
+let stepCounter = 0;
+
+// Settings persistence (apiagent-inspired)
+const SETTINGS_KEY = 'llm_agent_settings_v1';
+
+function serializeSettings() {
+  return {
+    provider: els.provider.value,
+    model: els.model.value,
+    apiKey: els.apiKey.value,
+    customBaseUrl: els.customBaseUrl.value,
+    googleKey: els.googleKey.value,
+    googleCx: els.googleCx.value,
+    aipipeUrl: els.aipipeUrl.value,
+    aipipeToken: els.aipipeToken.value,
+  };
+}
+
+function applySettings(s) {
+  if (!s) return;
+  if (s.provider) els.provider.value = s.provider;
+  if (s.model) els.model.value = s.model;
+  if (s.apiKey) els.apiKey.value = s.apiKey;
+  if (s.customBaseUrl) els.customBaseUrl.value = s.customBaseUrl;
+  if (s.googleKey) els.googleKey.value = s.googleKey;
+  if (s.googleCx) els.googleCx.value = s.googleCx;
+  if (s.aipipeUrl) els.aipipeUrl.value = s.aipipeUrl;
+  if (s.aipipeToken) els.aipipeToken.value = s.aipipeToken;
+  els.customBaseWrap.classList.toggle('d-none', els.provider.value !== 'custom');
+}
+
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(serializeSettings())); } catch {}
+}
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (raw) applySettings(JSON.parse(raw));
+  } catch {}
+}
 
 // UI helpers
 function showAlert(kind, text) {
@@ -53,6 +94,53 @@ function addMessage(role, content, meta = {}) {
   if (role !== 'tool' && !meta.noRecord) conversation.push({ role, content, ...meta });
 }
 
+// Extraction helpers (fallbacks when model omits tool args)
+function getRecentUserText(maxTurns = 3) {
+  const users = conversation.filter(m => m.role === 'user').slice(-maxTurns);
+  return users.map(m => m.content || '').join('\n');
+}
+
+function findFirstJsonObject(text) {
+  if (!text) return null;
+  let depth = 0;
+  let start = -1;
+  let inStr = false;
+  let esc = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      if (esc) { esc = false; }
+      else if (ch === '\\') { esc = true; }
+      else if (ch === '"') { inStr = false; }
+      continue;
+    }
+    if (ch === '"') { inStr = true; continue; }
+    if (ch === '{') { if (depth === 0) start = i; depth++; }
+    else if (ch === '}') { depth--; if (depth === 0 && start !== -1) {
+      const candidate = text.slice(start, i + 1);
+      try { return JSON.parse(candidate); } catch {}
+    }}
+  }
+  return null;
+}
+
+function extractJsonLabeled(text, label) {
+  if (!text) return null;
+  const idx = text.toLowerCase().lastIndexOf(label.toLowerCase());
+  if (idx === -1) return null;
+  const tail = text.slice(idx);
+  return findFirstJsonObject(tail);
+}
+
+function extractCodeFromText(text) {
+  if (!text) return '';
+  const fence = text.match(/```(?:js|javascript)?\s*([\s\S]*?)```/i);
+  if (fence) return fence[1].trim();
+  const codeColon = text.match(/code\s*:\s*([\s\S]*)$/i);
+  if (codeColon) return codeColon[1].trim();
+  return '';
+}
+
 function updateLastAssistantPartial(text) {
   const nodes = els.chat.querySelectorAll('.msg.assistant');
   const last = nodes[nodes.length - 1];
@@ -72,12 +160,21 @@ function finalizeLastAssistant(text) {
 els.provider.addEventListener('change', () => {
   const val = els.provider.value;
   els.customBaseWrap.classList.toggle('d-none', val !== 'custom');
+  saveSettings();
 });
 
 els.clearBtn.addEventListener('click', () => {
   conversation = [];
   els.chat.innerHTML = '';
 });
+
+// Persist settings on edits
+['input', 'change'].forEach(evt => {
+  [els.model, els.apiKey, els.customBaseUrl, els.googleKey, els.googleCx, els.aipipeUrl, els.aipipeToken].forEach(el => {
+    el.addEventListener(evt, saveSettings);
+  });
+});
+loadSettings();
 
 // Tools
 const tools = [
@@ -135,7 +232,14 @@ async function handleToolCall(call) {
       const key = els.googleKey.value.trim();
       const cx = els.googleCx.value.trim();
       if (!key || !cx) throw new Error('Google key or CSE CX missing');
-      const q = encodeURIComponent(args.query);
+      let query = (args.query || '').trim();
+      if (!query) {
+        const uText = getRecentUserText(2);
+        // crude fallback: take the line after 'search' or the whole text
+        const m = uText.match(/search\s*(for|:)\s*([^\n]+)/i);
+        query = (m ? m[2] : uText).slice(0, 200);
+      }
+      const q = encodeURIComponent(query);
       const num = Math.min(5, Math.max(1, args.num || 3));
       const url = `https://www.googleapis.com/customsearch/v1?key=${key}&cx=${cx}&q=${q}&num=${num}`;
       const res = await fetch(url);
@@ -149,13 +253,18 @@ async function handleToolCall(call) {
       const url = els.aipipeUrl.value.trim();
       if (!url) throw new Error('AI Pipe endpoint missing');
       const token = els.aipipeToken.value.trim();
+      let payload = args.payload;
+      if (!payload || (typeof payload === 'object' && Object.keys(payload).length === 0)) {
+        const uText = getRecentUserText(3);
+        payload = extractJsonLabeled(uText, 'payload') || findFirstJsonObject(uText) || {};
+      }
       const res = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(token ? { Authorization: `Bearer ${token}` } : {})
         },
-        body: JSON.stringify(args.payload || {})
+        body: JSON.stringify(payload || {})
       });
       if (!res.ok) throw new Error(`AI Pipe failed: ${res.status}`);
       const data = await res.json().catch(async () => ({ text: await res.text() }));
@@ -163,7 +272,11 @@ async function handleToolCall(call) {
       return { tool_call_id: call.id, role: 'tool', name, content: JSON.stringify(data) };
     }
     if (name === 'js_exec') {
-      const code = String(args.code || '');
+      let code = String(args.code || '');
+      if (!code.trim()) {
+        const uText = getRecentUserText(3);
+        code = extractCodeFromText(uText) || '';
+      }
       const result = await executeInSandbox(code);
       addToolMessage('js_exec', result.ok ? result.stdout : `Error: ${result.error}`);
       return { tool_call_id: call.id, role: 'tool', name, content: JSON.stringify(result) };
@@ -176,10 +289,27 @@ async function handleToolCall(call) {
 }
 
 function addToolMessage(toolName, text) {
+  stepCounter += 1;
   const node = document.createElement('div');
   node.className = 'msg tool';
-  node.innerHTML = `<span class="role">Tool (${escapeHtml(toolName)}):</span> <pre class="m-0">${escapeHtml(text)}</pre>`;
+  node.innerHTML = `
+    <div class="d-flex justify-content-between align-items-center">
+      <span class="role">Tool (${escapeHtml(toolName)}) — Step ${stepCounter}:</span>
+      <button class="btn btn-sm btn-outline-secondary copy-btn">Copy</button>
+    </div>
+    <pre class="m-0">${escapeHtml(text)}</pre>`;
   els.chat.appendChild(node);
+  const copyBtn = node.querySelector('.copy-btn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+        showAlert('success', 'Copied tool output');
+      } catch (e) {
+        showAlert('danger', 'Copy failed');
+      }
+    });
+  }
   els.chat.scrollTop = els.chat.scrollHeight;
 }
 
