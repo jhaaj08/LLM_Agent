@@ -19,6 +19,7 @@ const els = {
   clearBtn: document.getElementById('clearBtn'),
   sandbox: document.getElementById('sandbox'),
   pickProviderBtn: document.getElementById('pickProviderBtn'),
+  apiKeyWrap: document.getElementById('apiKeyWrap'),
 };
 
 let abortController = null;
@@ -63,6 +64,7 @@ function applySettings(s) {
   if (s.managedByPicker) {
     els.apiKey.dataset.managedByPicker = 'true';
     els.apiKey.disabled = true;
+    els.apiKeyWrap?.classList.add('d-none');
   }
 }
 
@@ -206,6 +208,7 @@ els.pickProviderBtn?.addEventListener('click', async () => {
       els.apiKey.value = apiKey;
       els.apiKey.dataset.managedByPicker = 'true';
       els.apiKey.disabled = true;
+      els.apiKeyWrap?.classList.add('d-none');
     }
     if (Array.isArray(models) && models.length && !els.model.value) els.model.value = models[0];
     saveSettings();
