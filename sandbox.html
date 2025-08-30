@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Sandbox</title>
+  </head>
+  <body>
+    <script>
+      // Minimal JS execution sandbox. Receives { code, id } and returns { id, ok, stdout, error }.
+      const originalConsoleLog = console.log;
+      window.addEventListener('message', async (event) => {
+        const data = event.data || {};
+        if (!data || data.type !== 'execute-js' || typeof data.code !== 'string') return;
+        const execId = data.id;
+        let stdout = '';
+        try {
+          const logs = [];
+          console.log = (...args) => {
+            logs.push(args.map(String).join(' '));
+          };
+          // Execute in Function to avoid access to local scope
+          const fn = new Function(`"use strict";\n${data.code}`);
+          const result = await Promise.resolve(fn());
+          if (logs.length) stdout += logs.join('\n');
+          if (result !== undefined) {
+            if (stdout) stdout += '\n';
+            stdout += String(result);
+          }
+          parent.postMessage({ type: 'execute-js-result', id: execId, ok: true, stdout }, '*');
+        } catch (err) {
+          parent.postMessage({ type: 'execute-js-result', id: execId, ok: false, error: String(err && err.stack || err) }, '*');
+        } finally {
+          console.log = originalConsoleLog;
+        }
+      });
+    </script>
+  </body>
+  </html>
+
+
