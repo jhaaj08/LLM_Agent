@@ -18,6 +18,7 @@ const els = {
   stopBtn: document.getElementById('stopBtn'),
   clearBtn: document.getElementById('clearBtn'),
   sandbox: document.getElementById('sandbox'),
+  pickProviderBtn: document.getElementById('pickProviderBtn'),
 };
 
 let abortController = null;
@@ -175,6 +176,30 @@ els.clearBtn.addEventListener('click', () => {
   });
 });
 loadSettings();
+
+// bootstrap-llm-provider integration (CDN dynamic import)
+els.pickProviderBtn?.addEventListener('click', async () => {
+  try {
+    const mod = await import('https://cdn.jsdelivr.net/npm/bootstrap-llm-provider@1.2');
+    const { openaiConfig } = mod;
+    const { baseUrl, apiKey, models } = await openaiConfig({
+      defaultBaseUrls: ['https://api.openai.com/v1', 'https://openrouter.ai/api/v1'],
+      help: '<div class="alert alert-info mb-2">Enter your OpenAI/OpenRouter base URL and key. This demo stores it locally.</div>',
+      show: true,
+    });
+    if (baseUrl) {
+      els.provider.value = baseUrl.includes('openrouter') ? 'openrouter' : (baseUrl.includes('openai') ? 'openai' : 'custom');
+      els.customBaseUrl.value = baseUrl;
+      els.customBaseWrap.classList.toggle('d-none', els.provider.value !== 'custom');
+    }
+    if (apiKey) els.apiKey.value = apiKey;
+    if (Array.isArray(models) && models.length && !els.model.value) els.model.value = models[0];
+    saveSettings();
+    showAlert('success', 'Provider configured');
+  } catch (e) {
+    showAlert('danger', `Provider picker error: ${String(e && e.message || e)}`);
+  }
+});
 
 // Tools
 const tools = [
