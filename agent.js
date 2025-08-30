@@ -387,6 +387,8 @@ function getBaseUrl() {
   const provider = els.provider.value;
   if (provider === 'openai') return 'https://api.openai.com/v1';
   if (provider === 'openrouter') return 'https://openrouter.ai/api/v1';
+  if (provider === 'groq') return 'https://api.groq.com/openai/v1';
+  if (provider === 'ollama') return 'http://localhost:11434/v1';
   if (provider === 'custom') return els.customBaseUrl.value.trim() || 'https://example.com/v1';
   return 'https://api.openai.com/v1';
 }
