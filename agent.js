@@ -45,6 +45,7 @@ function serializeSettings() {
     googleCx: els.googleCx.value,
     aipipeUrl: els.aipipeUrl.value,
     aipipeToken: els.aipipeToken.value,
+    managedByPicker: !!els.apiKey.dataset.managedByPicker,
   };
 }
 
@@ -59,6 +60,10 @@ function applySettings(s) {
   if (s.aipipeUrl) els.aipipeUrl.value = s.aipipeUrl;
   if (s.aipipeToken) els.aipipeToken.value = s.aipipeToken;
   els.customBaseWrap.classList.toggle('d-none', els.provider.value !== 'custom');
+  if (s.managedByPicker) {
+    els.apiKey.dataset.managedByPicker = 'true';
+    els.apiKey.disabled = true;
+  }
 }
 
 function saveSettings() {
@@ -183,7 +188,12 @@ els.pickProviderBtn?.addEventListener('click', async () => {
     const mod = await import('https://cdn.jsdelivr.net/npm/bootstrap-llm-provider@1.2');
     const { openaiConfig } = mod;
     const { baseUrl, apiKey, models } = await openaiConfig({
-      defaultBaseUrls: ['https://api.openai.com/v1', 'https://openrouter.ai/api/v1'],
+      baseUrls: [
+        { url: 'https://api.openai.com/v1', name: 'OpenAI' },
+        { url: 'https://openrouter.ai/api/v1', name: 'OpenRouter' },
+        { url: 'https://api.groq.com/openai/v1', name: 'Groq' },
+        { url: 'http://localhost:11434/v1', name: 'Ollama (local)' },
+      ],
       help: '<div class="alert alert-info mb-2">Enter your OpenAI/OpenRouter base URL and key. This demo stores it locally.</div>',
       show: true,
     });
@@ -192,7 +202,11 @@ els.pickProviderBtn?.addEventListener('click', async () => {
       els.customBaseUrl.value = baseUrl;
       els.customBaseWrap.classList.toggle('d-none', els.provider.value !== 'custom');
     }
-    if (apiKey) els.apiKey.value = apiKey;
+    if (apiKey) {
+      els.apiKey.value = apiKey;
+      els.apiKey.dataset.managedByPicker = 'true';
+      els.apiKey.disabled = true;
+    }
     if (Array.isArray(models) && models.length && !els.model.value) els.model.value = models[0];
     saveSettings();
     showAlert('success', 'Provider configured');
